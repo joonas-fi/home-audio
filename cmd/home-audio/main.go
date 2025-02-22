@@ -24,7 +24,7 @@ func main() {
 
 	cmd := &cobra.Command{
 		Use:   "speak [phrase]",
-		Short: "Speak a phrase on a device",
+		Short: "TTS a phrase to get audio and then play that on a device",
 		Args:  cobra.ExactArgs(1),
 		Run: cli.WrapRun(func(ctx context.Context, args []string) error {
 			return speakCLI(ctx, args[0])
@@ -32,6 +32,17 @@ func main() {
 	}
 	cli.AddLogLevelControls(cmd.Flags())
 	app.AddCommand(cmd)
+
+	app.AddCommand(&cobra.Command{
+		Use:   "play-audio [url]",
+		Short: "Play audio on a device",
+		Args:  cobra.ExactArgs(1),
+		Run: cli.WrapRun(func(ctx context.Context, args []string) error {
+			return playCLI(ctx, args[0], defaultEffects())
+		}),
+	})
+
+	app.AddCommand(debugEntrypoint())
 
 	app.AddCommand(&cobra.Command{
 		Use:   "server",
@@ -69,7 +80,11 @@ func speakCLI(ctx context.Context, phrase string) error {
 
 	slog.Debug("got URL", "url", speechDownloadURL)
 
-	if err := effects.PlayAudio(ctx, speechDownloadURL); err != nil {
+	return playCLI(ctx, speechDownloadURL, effects)
+}
+
+func playCLI(ctx context.Context, audioURL string, effects Effects) error {
+	if err := effects.PlayAudio(ctx, audioURL); err != nil {
 		return err
 	}
 	return nil

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"os"
@@ -37,16 +38,29 @@ type Effects struct {
 func newServerHandler(effects Effects) http.Handler {
 	routes := http.NewServeMux()
 
+	enc := base64.RawStdEncoding
+
+	routes.HandleFunc("GET /home-audio/api/tts", httputils.WrapWithErrorHandling(func(w http.ResponseWriter, r *http.Request) error {
+		phrase, err := enc.DecodeString(r.URL.Query().Get("phrase"))
+		if err != nil {
+			return err
+		}
+		w.Header().Set("Content-Type", "audio/wav") // https://mimetype.io/audio/wav
+		return wyomingTextToSpeech("192.168.1.105:10200", string(phrase), w)
+	}))
+
 	routes.HandleFunc("POST /home-audio/api/speak", httputils.WrapWithErrorHandling(func(w http.ResponseWriter, r *http.Request) error {
 		req := homeaudiotypes.SpeakInput{}
 		if err := jsonfile.UnmarshalDisallowUnknownFields(r.Body, &req); err != nil {
 			return err
 		}
 
-		audio, err := effects.TextToSpeech(r.Context(), req.Phrase)
-		if err != nil {
-			return fmt.Errorf("TextToSpeech: %w", err)
-		}
+		// audio, err := effects.TextToSpeech(r.Context(), req.Phrase)
+		// if err != nil {
+		// 	return fmt.Errorf("TextToSpeech: %w", err)
+		// }
+
+		audio := "http://192.168.1.105:5901/home-audio/api/tts?phrase=" + enc.EncodeToString([]byte(req.Phrase))
 
 		if err := effects.PlayAudio(r.Context(), audio); err != nil {
 			return fmt.Errorf("PlayAudio: %w", err)
