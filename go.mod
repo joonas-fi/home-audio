@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.23.1
 
 require (
-	github.com/function61/gokit v0.0.0-20250122105845-0acfdd5a5212
+	github.com/function61/gokit v0.0.0-20250630084705-723dd31d86d9
 	github.com/spf13/cobra v1.6.1
 )
 

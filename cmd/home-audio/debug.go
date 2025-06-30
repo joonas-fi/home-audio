@@ -23,19 +23,20 @@ func debugEntrypoint() *cobra.Command {
 		Use:   "debug [phrase]",
 		Short: "debug",
 		Args:  cobra.ExactArgs(1),
-		Run: cli.WrapRun(func(ctx context.Context, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			serverAddr := "192.168.1.105:10200"
 			if true {
-				return wyomingTextToSpeech(serverAddr, args[0], os.Stdout)
+				return wyomingTextToSpeech(cmd.Context(), serverAddr, args[0], os.Stdout)
 			}
 			return wyomingDescribe(serverAddr)
-		}),
+
+		},
 	}
 	cli.AddLogLevelControls(cmd.Flags())
 	return cmd
 }
 
-func wyomingTextToSpeech(serverAddr string, phrase string, output io.Writer) error {
+func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, output io.Writer) error {
 	if err := ErrorIfUnset(phrase == "", "phrase"); err != nil {
 		return err
 	}
@@ -102,6 +103,13 @@ func wyomingTextToSpeech(serverAddr string, phrase string, output io.Writer) err
 			if err := audioChunk.msg.Type.ExpectToBe(wyomingCommandAudioChunk); err != nil {
 				return err
 			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			// continue
 		}
 
 		// got audio chunk
