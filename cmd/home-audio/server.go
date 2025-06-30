@@ -11,6 +11,7 @@ import (
 	"github.com/function61/gokit/encoding/jsonfile"
 	"github.com/function61/gokit/net/http/httputils"
 	"github.com/joonas-fi/home-audio/pkg/homeaudiotypes"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func server(ctx context.Context) error {
@@ -39,6 +40,8 @@ type AudioPlayer func(ctx context.Context, url string) error
 
 func newServerHandler(effects Effects) http.Handler {
 	routes := http.NewServeMux()
+
+	routes.Handle("/metrics", promhttp.Handler())
 
 	routes.HandleFunc("GET /home-audio/api/tts", httputils.WrapWithErrorHandling(func(w http.ResponseWriter, r *http.Request) error {
 		phrase, err := enc.DecodeString(r.URL.Query().Get("phrase"))

@@ -8,10 +8,23 @@ import (
 	"time"
 
 	"github.com/joonas-fi/home-audio/internal/bytespromise"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 const (
 	cacheExpiration = 10 * time.Minute
+)
+
+var (
+	hitsMetric = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "homeaudio_ttscache_hits",
+		Help: "Cache hits",
+	})
+	missesMetric = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "homeaudio_ttscache_misses",
+		Help: "Cache misses",
+	})
 )
 
 func New() *ttsCache {
@@ -40,8 +53,11 @@ func (s *ttsCache) Get(key string, generator func(wc io.WriteCloser) error) io.R
 
 	item, has := s.cache[key]
 	if has { // was cached
+		hitsMetric.Inc()
 		return item.promise.NewReader()
 	}
+
+	missesMetric.Inc()
 
 	// not cached. first one needs to produce the item
 	promise := bytespromise.New()
