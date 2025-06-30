@@ -8,6 +8,8 @@ github.com/function61/gokit v0.0.0-20230206130116-7988167114d0 h1:5Yd9/ktJquNoJU
 github.com/function61/gokit v0.0.0-20230206130116-7988167114d0/go.mod h1:weOgZO9JM0mP2VnLQTCv+5AaC7EvcSiAtFIquZws/Us=
 github.com/function61/gokit v0.0.0-20250122105845-0acfdd5a5212 h1:Uq7dECX1GJ3Gjv81GoXL2GM8TaPuFvC/7nFzHeDG/eQ=
 github.com/function61/gokit v0.0.0-20250122105845-0acfdd5a5212/go.mod h1:ewGYmDoaszHKjwN9S2AM30oQwe4mhvuRUA4uvzzkmRw=
+github.com/function61/gokit v0.0.0-20250630084705-723dd31d86d9 h1:NEjGJK3zLig2fLQ2Olk3wQYrZ1tTKYNVBqNh75XgL6I=
+github.com/function61/gokit v0.0.0-20250630084705-723dd31d86d9/go.mod h1:ewGYmDoaszHKjwN9S2AM30oQwe4mhvuRUA4uvzzkmRw=
 github.com/google/go-cmp v0.5.6/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/inconshreveable/mousetrap v1.0.1 h1:U3uMjPSQEBMNp1lFxmllqCPM6P5u/Xq7Pgzkat/bFNc=
 github.com/inconshreveable/mousetrap v1.0.1/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
