@@ -10,6 +10,8 @@ import (
 )
 
 // uses Home Assistant to drive text-to-speech process
+//
+//nolint:unused
 func makeSpeechHomeAssistant(ctx context.Context, phrase string, sink io.Writer) error {
 	withErr := FuncWrapErr
 
