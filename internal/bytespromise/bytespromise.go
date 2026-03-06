@@ -26,13 +26,13 @@ func New() *Promise {
 	}
 }
 
-func (b *Promise) NewWriter() io.WriteCloser {
-	return &bytesPromiseWriter{b}
+func (p *Promise) NewWriter() io.WriteCloser {
+	return &bytesPromiseWriter{p}
 }
 
-func (b *Promise) NewReader() io.Reader {
+func (p *Promise) NewReader() io.Reader {
 	return &bytesPromiseReader{
-		promise: b,
+		promise: p,
 		offset:  0,
 	}
 }
@@ -57,7 +57,7 @@ func (p *Promise) Write(buf []byte, isLast bool) (int, error) {
 }
 
 func (p *Promise) Read(out []byte, offset int) (int, error) {
-	n, err, nextChunkAvailable := func() (int, error, chan Void) {
+	n, nextChunkAvailable, err := func() (int, chan Void, error) {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 
@@ -70,9 +70,9 @@ func (p *Promise) Read(out []byte, offset int) (int, error) {
 		// `n==0`
 		select {
 		case <-p.done:
-			return 0, io.EOF, nil
+			return 0, nil, io.EOF
 		default: // no EOF but got not data => wait for more data to arrive
-			return 0, nil, p.nextChunkAvailable
+			return 0, p.nextChunkAvailable, nil
 		}
 	}()
 	if nextChunkAvailable != nil { // `n` and `err` were nil
@@ -98,7 +98,7 @@ type bytesPromiseWriter struct {
 	promise *Promise
 }
 
-func (b *bytesPromiseWriter) Write(p []byte) (n int, err error) {
+func (b *bytesPromiseWriter) Write(p []byte) (int, error) {
 	return b.promise.Write(p, false)
 }
 

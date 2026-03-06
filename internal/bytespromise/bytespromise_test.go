@@ -16,11 +16,11 @@ func TestBytesPromise(t *testing.T) {
 
 	go func() {
 		w := bp.NewWriter()
-		w.Write([]byte("audio: "))
+		_, _ = w.Write([]byte("audio: "))
 		time.Sleep(75 * time.Millisecond)
-		w.Write([]byte("hello world"))
+		_, _ = w.Write([]byte("hello world"))
 		time.Sleep(25 * time.Millisecond)
-		w.Write([]byte(" from my slow stream"))
+		_, _ = w.Write([]byte(" from my slow stream"))
 		w.Close()
 	}()
 

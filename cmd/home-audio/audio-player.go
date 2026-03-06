@@ -59,7 +59,7 @@ func playUsingScreenServerClient(ctx context.Context, ip string, speechDownloadU
 	}
 
 	cmd := []string{"audio.play", speechDownloadURL}
-	if _, err := server.Write([]byte(fmt.Sprintf("%s\n", strings.Join(cmd, ",")))); err != nil {
+	if _, err := fmt.Fprintf(server, "%s\n", strings.Join(cmd, ",")); err != nil {
 		return err
 	}
 
