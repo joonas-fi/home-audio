@@ -17,6 +17,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 	"github.com/youpy/go-wav"
+	"github.com/zeozeozeo/gomplerate"
 )
 
 func debugEntrypoint() *cobra.Command {
@@ -101,7 +102,7 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 		outputSampleRate,
 		uint16(audioHeader.Width*8))
 
-	collectedForResampling := []int{}
+	collectedForResampling := []int16{}
 
 	audioChunksProcessed := 0
 
@@ -112,10 +113,16 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 			return err
 		case audioChunk.msg.Type == wyomingCommandAudioStop: // job here is done
 			if shouldResample {
-				resampled := downsamplePCM16WavValues(collectedForResampling, audioHeader.Rate, *sampleRate)
+				resampler, err := gomplerate.NewResampler(1, audioHeader.Rate, *sampleRate)
+				if err != nil {
+					return err
+				}
+
+				resampled := resampler.ResampleInt16(collectedForResampling)
+				// resampled := downsamplePCM16WavValues(collectedForResampling, audioHeader.Rate, *sampleRate)
 				samples := make([]wav.Sample, len(resampled))
 				for i := range resampled {
-					samples[i].Values[0] = resampled[i]
+					samples[i].Values[0] = int(resampled[i])
 				}
 
 				slog.Info("resampled write path", "audioChunksProcessed", audioChunksProcessed)
@@ -152,13 +159,13 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 					sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
 					channelOffset := ch * audioHeader.Width
 					offset := sampleOffset + channelOffset
-					collectedForResampling = append(collectedForResampling, sampleReader(audioChunk.payload[offset:]))
+					collectedForResampling = append(collectedForResampling, int16(sampleReader(audioChunk.payload[offset:])))
 				}
 			}
 		} else {
 			samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
 			samples := make([]wav.Sample, samplesInChunk)
-			for sampleIdx := 0; sampleIdx < len(samples); sampleIdx++ {
+			for sampleIdx := range samples {
 				for ch := 0; ch < audioHeader.Channels; ch++ {
 					sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
 					channelOffset := ch * audioHeader.Width
