@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"time"
 
@@ -26,7 +27,7 @@ func debugEntrypoint() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			serverAddr := "192.168.1.105:10200"
 			if true {
-				return wyomingTextToSpeech(cmd.Context(), serverAddr, args[0], os.Stdout)
+				return wyomingTextToSpeech(cmd.Context(), serverAddr, args[0], os.Stdout, nil)
 			}
 			return wyomingDescribe(serverAddr)
 
@@ -36,7 +37,7 @@ func debugEntrypoint() *cobra.Command {
 	return cmd
 }
 
-func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, output io.Writer) error {
+func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, output io.Writer, sampleRate *int) error {
 	if err := ErrorIfUnset(phrase == "", "phrase"); err != nil {
 		return err
 	}
@@ -50,6 +51,8 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 		Type: wyomingCommandSynthesize,
 		Data: wyomingData{
 			Text: phrase,
+			// NOTE: there doesn't seem to be sample rate support for synthesize command
+			// https://github.com/rhasspy/rhasspy3/blob/master/docs/wyoming.md
 		},
 	}); err != nil {
 		return err
@@ -80,6 +83,12 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 		return err
 	}
 
+	outputSampleRate := uint32(audioHeader.Rate)
+	shouldResample := sampleRate != nil
+	if shouldResample {
+		outputSampleRate = uint32(*sampleRate)
+	}
+
 	// we're receiving a stream of audio whose length we're beforehand unsure of, hence we can't know the
 	// # of samples (unless we do buffering), so just lie that we have an hour of audio. (I guess it's less wrong for
 	// the audio data to be shorter than spec'd versus longer than spec's as that could leave the player to stop prematurely)
@@ -89,7 +98,7 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 		output,
 		uint32(numSamplesLie),
 		uint16(audioHeader.Channels),
-		uint32(audioHeader.Rate),
+		outputSampleRate,
 		uint16(audioHeader.Width*8))
 
 	for {
@@ -114,20 +123,48 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 
 		// got audio chunk
 
-		samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
-		samples := make([]wav.Sample, samplesInChunk)
-		for sampleIdx := 0; sampleIdx < len(samples); sampleIdx++ {
-			for ch := 0; ch < audioHeader.Channels; ch++ {
-				sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
-				channelOffset := ch * audioHeader.Width
-				offset := sampleOffset + channelOffset
-				samples[sampleIdx].Values[ch] = sampleReader(audioChunk.payload[offset:])
+		if shouldResample {
+			if audioHeader.Channels != 1 {
+				panic("stereo resampling not supported")
+			}
+
+			intSamples := []int{}
+			samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
+			for sampleIdx := 0; sampleIdx < samplesInChunk; sampleIdx++ {
+				for ch := 0; ch < audioHeader.Channels; ch++ {
+					sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
+					channelOffset := ch * audioHeader.Width
+					offset := sampleOffset + channelOffset
+					intSamples = append(intSamples, sampleReader(audioChunk.payload[offset:]))
+				}
+			}
+
+			resampled := downsamplePCM[int](intSamples, audioHeader.Rate, *sampleRate)
+			samples := make([]wav.Sample, len(resampled))
+			for i := range resampled {
+				samples[i].Values[0] = resampled[i]
+			}
+
+			if err := wavWriter.WriteSamples(samples); err != nil {
+				return err
+			}
+		} else {
+			samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
+			samples := make([]wav.Sample, samplesInChunk)
+			for sampleIdx := 0; sampleIdx < len(samples); sampleIdx++ {
+				for ch := 0; ch < audioHeader.Channels; ch++ {
+					sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
+					channelOffset := ch * audioHeader.Width
+					offset := sampleOffset + channelOffset
+					samples[sampleIdx].Values[ch] = sampleReader(audioChunk.payload[offset:])
+				}
+			}
+
+			if err := wavWriter.WriteSamples(samples); err != nil {
+				return err
 			}
 		}
 
-		if err := wavWriter.WriteSamples(samples); err != nil {
-			return err
-		}
 	}
 }
 
@@ -167,4 +204,50 @@ func wyomingDescribe(serverAddr string) error {
 	}
 
 	return nil
+}
+
+// downsamplePCM downsamples the sample rate to the given value using averaging values.
+// An example of reducing the sampling frequency from 48000 hertz to 16000 hertz:
+// PcmDownsample[int16]([]int16{...}, 48000, 16000)
+//
+// Note: attempting to upsample will return the result unchanged
+func downsamplePCM[U, T Number](pcmData []T, srcSampleRate, dstSampleRate int) []U {
+	sampleRateRatio := srcSampleRate / dstSampleRate
+	if sampleRateRatio <= 1 {
+		return convertNumbers[U](pcmData)
+	}
+
+	newPcmData := make([]U, len(pcmData)/sampleRateRatio)
+	var offsetResult = 0
+	var offsetBuffer = 0
+	for offsetResult < len(newPcmData) {
+		var nextOffsetBuffer = int(math.Round(float64(offsetResult+1) * float64(sampleRateRatio)))
+		// Use average value of skipped samples
+		var accum float64
+		var count float64
+		for i := offsetBuffer; i < nextOffsetBuffer && i < len(pcmData); i++ {
+			accum += float64(pcmData[i])
+			count++
+		}
+
+		newPcmData[offsetResult] = U(accum / count)
+		offsetResult++
+		offsetBuffer = nextOffsetBuffer
+	}
+
+	return newPcmData
+}
+
+// convertNumbers casts a slice of numbers to a slice of numbers of another type.
+// Example convert []int to []float32: convertNumbers[float32]([]int{1, 2, 3, 4, 5})
+func convertNumbers[U, T Number](s []T) []U {
+	out := make([]U, len(s))
+	for i := range s {
+		out[i] = U(s[i])
+	}
+	return out
+}
+
+type Number interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~float32 | ~float64
 }

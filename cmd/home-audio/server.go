@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/function61/gokit/encoding/jsonfile"
 	"github.com/function61/gokit/net/http/httputils"
@@ -29,9 +30,9 @@ func server(ctx context.Context) error {
 func defaultEffects() Effects {
 	return Effects{
 		TextToSpeechURL: makeSpeechURLHomeAudio,
-		TextToSpeech: func(ctx context.Context, phrase string, writer io.Writer) error {
+		TextToSpeech: func(ctx context.Context, phrase string, writer io.Writer, sampleRate *int) error {
 			const homeFn61NetPiper = "192.168.1.105:10200"
-			return wyomingTextToSpeech(ctx, homeFn61NetPiper, phrase, writer)
+			return wyomingTextToSpeech(ctx, homeFn61NetPiper, phrase, writer, sampleRate)
 		},
 		// TextToSpeech:    makeSpeechHomeAssistant,
 		PlayAudio: playUsingScreenServerClientScreenWall,
@@ -41,7 +42,7 @@ func defaultEffects() Effects {
 type Effects struct {
 	TextToSpeechURL func(ctx context.Context, phrase string) (string, error)
 	// outputs phrase as audio (.wav) bytes
-	TextToSpeech func(ctx context.Context, phrase string, writer io.Writer) error
+	TextToSpeech func(ctx context.Context, phrase string, writer io.Writer, sampleRate *int) error
 	PlayAudio    AudioPlayer
 }
 
@@ -56,6 +57,19 @@ func newServerHandler(effects Effects) http.Handler {
 	routes.Handle("/metrics", promhttp.Handler())
 
 	routes.HandleFunc("GET /home-audio/api/tts", httputils.WrapWithErrorHandling(func(w http.ResponseWriter, r *http.Request) error {
+		sampleRateOverride := func() *int {
+			sampleRateStr := r.URL.Query().Get("sample_rate")
+			if sampleRateStr == "" {
+				return nil
+			}
+
+			s, err := strconv.Atoi(sampleRateStr)
+			if err != nil {
+				panic(err)
+			}
+
+			return &s
+		}()
 		phrase, err := base64RawStd.DecodeString(r.URL.Query().Get("phrase"))
 		if err != nil {
 			return err
@@ -67,13 +81,14 @@ func newServerHandler(effects Effects) http.Handler {
 
 		// this is only ran if the item is not in cache
 		ttsPhraseGenerator := func(sink io.WriteCloser) error {
-			if err := effects.TextToSpeech(r.Context(), string(phrase), sink); err != nil {
+			if err := effects.TextToSpeech(r.Context(), string(phrase), sink, sampleRateOverride); err != nil {
 				return err
 			}
 
 			return sink.Close()
 		}
 
+		// TODO: include sample rate in the cache key
 		if _, err := io.Copy(w, cache.Get(string(phrase), ttsPhraseGenerator)); err != nil {
 			return err
 		}
