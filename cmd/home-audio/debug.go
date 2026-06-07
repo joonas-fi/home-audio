@@ -103,6 +103,8 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 
 	collectedForResampling := []int{}
 
+	audioChunksProcessed := 0
+
 	for {
 		audioChunk, err := wyomingServer.ReadAnyResponse()
 		switch { // expecting either an audio chunk or audio stop event.
@@ -116,6 +118,8 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 					samples[i].Values[0] = resampled[i]
 				}
 
+				slog.Info("resampled write path", "audioChunksProcessed", audioChunksProcessed)
+
 				if err := wavWriter.WriteSamples(samples); err != nil {
 					return err
 				}
@@ -125,6 +129,8 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 			if err := audioChunk.msg.Type.ExpectToBe(wyomingCommandAudioChunk); err != nil {
 				return err
 			}
+
+			audioChunksProcessed++
 		}
 
 		select {
