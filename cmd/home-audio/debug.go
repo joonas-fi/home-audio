@@ -101,12 +101,25 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 		outputSampleRate,
 		uint16(audioHeader.Width*8))
 
+	collectedForResampling := []int{}
+
 	for {
 		audioChunk, err := wyomingServer.ReadAnyResponse()
 		switch { // expecting either an audio chunk or audio stop event.
 		case err != nil:
 			return err
 		case audioChunk.msg.Type == wyomingCommandAudioStop: // job here is done
+			if shouldResample {
+				resampled := downsamplePCM16WavValues(collectedForResampling, audioHeader.Rate, *sampleRate)
+				samples := make([]wav.Sample, len(resampled))
+				for i := range resampled {
+					samples[i].Values[0] = resampled[i]
+				}
+
+				if err := wavWriter.WriteSamples(samples); err != nil {
+					return err
+				}
+			}
 			return nil
 		default:
 			if err := audioChunk.msg.Type.ExpectToBe(wyomingCommandAudioChunk); err != nil {
@@ -128,25 +141,13 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 				panic("stereo resampling not supported")
 			}
 
-			intSamples := []int{}
-			samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
-			for sampleIdx := 0; sampleIdx < samplesInChunk; sampleIdx++ {
+			for sampleIdx, samplesInChunk := 0, len(audioChunk.payload)/audioHeader.Width/audioHeader.Channels; sampleIdx < samplesInChunk; sampleIdx++ {
 				for ch := 0; ch < audioHeader.Channels; ch++ {
 					sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
 					channelOffset := ch * audioHeader.Width
 					offset := sampleOffset + channelOffset
-					intSamples = append(intSamples, sampleReader(audioChunk.payload[offset:]))
+					collectedForResampling = append(collectedForResampling, sampleReader(audioChunk.payload[offset:]))
 				}
-			}
-
-			resampled := downsamplePCM[int](intSamples, audioHeader.Rate, *sampleRate)
-			samples := make([]wav.Sample, len(resampled))
-			for i := range resampled {
-				samples[i].Values[0] = resampled[i]
-			}
-
-			if err := wavWriter.WriteSamples(samples); err != nil {
-				return err
 			}
 		} else {
 			samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
@@ -204,6 +205,22 @@ func wyomingDescribe(serverAddr string) error {
 	}
 
 	return nil
+}
+
+func downsamplePCM16WavValues(pcmData []int, srcSampleRate, dstSampleRate int) []int {
+	signedPcmData := make([]int, len(pcmData))
+	for i, sample := range pcmData {
+		signedPcmData[i] = int(int16(uint16(sample)))
+	}
+
+	signedDownsampled := downsamplePCM[int](signedPcmData, srcSampleRate, dstSampleRate)
+
+	wavValues := make([]int, len(signedDownsampled))
+	for i, sample := range signedDownsampled {
+		wavValues[i] = int(uint16(int16(sample)))
+	}
+
+	return wavValues
 }
 
 // downsamplePCM downsamples the sample rate to the given value using averaging values.
