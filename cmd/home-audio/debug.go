@@ -107,7 +107,7 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 
 		for idx := range asWavSamples {
 			for ch := 0; ch < audioHeader.Channels; ch++ {
-				asWavSamples[idx].Values[ch] = int(samples[ch][idx] * math.MaxUint16)
+				asWavSamples[idx].Values[ch] = int(1 + samples[ch][idx]*(math.MaxUint16/2))
 			}
 		}
 		return wavWriter.WriteSamples(asWavSamples)
@@ -208,7 +208,8 @@ func resolveSampleReader(bitsPerSample int) (func([]byte) float64, error) {
 	switch bitsPerSample {
 	case 16:
 		return func(buf []byte) float64 {
-			return float64(binary.LittleEndian.Uint16(buf)) / math.MaxUint16
+			const half = math.MaxUint16 / 2
+			return (float64(binary.LittleEndian.Uint16(buf)) - half) / (half)
 
 		}, nil
 	default:

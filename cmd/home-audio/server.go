@@ -42,6 +42,7 @@ func defaultEffects() Effects {
 type Effects struct {
 	TextToSpeechURL func(ctx context.Context, phrase string) (string, error)
 	// outputs phrase as audio (.wav) bytes
+	// sample rate can be specified because some destinations (like Asterisk) apparently don't to resampling and are very picky about sample rates...
 	TextToSpeech func(ctx context.Context, phrase string, writer io.Writer, sampleRate *int) error
 	PlayAudio    AudioPlayer
 }
@@ -63,12 +64,12 @@ func newServerHandler(effects Effects) http.Handler {
 				return nil
 			}
 
-			s, err := strconv.Atoi(sampleRateStr)
+			sampleRate, err := strconv.Atoi(sampleRateStr)
 			if err != nil {
 				panic(err)
 			}
 
-			return &s
+			return &sampleRate
 		}()
 		phrase, err := base64RawStd.DecodeString(r.URL.Query().Get("phrase"))
 		if err != nil {
@@ -88,7 +89,7 @@ func newServerHandler(effects Effects) http.Handler {
 			return sink.Close()
 		}
 
-		// TODO: include sample rate in the cache key
+		// FIXME: include sample rate in the cache key
 		if _, err := io.Copy(w, cache.Get(string(phrase), ttsPhraseGenerator)); err != nil {
 			return err
 		}
