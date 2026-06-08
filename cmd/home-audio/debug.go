@@ -107,7 +107,7 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 
 		for idx := range asWavSamples {
 			for ch := 0; ch < audioHeader.Channels; ch++ {
-				asWavSamples[idx].Values[ch] = int(1 + samples[ch][idx]*(math.MaxUint16/2))
+				asWavSamples[idx].Values[ch] = floatToPCM(samples[ch][idx])
 			}
 		}
 		return wavWriter.WriteSamples(asWavSamples)
@@ -242,4 +242,9 @@ func wyomingDescribe(serverAddr string) error {
 	}
 
 	return nil
+}
+
+// [-1...1] => 0..MaxUint16
+func floatToPCM(input float64) int {
+	return int((1 + input) * (math.MaxUint16 / 2))
 }

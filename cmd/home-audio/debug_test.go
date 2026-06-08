@@ -21,4 +21,8 @@ func TestFoo(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%.02f", reader(mkBuf(0))), "-1.00")
 	assert.Equal(t, fmt.Sprintf("%.02f", reader(mkBuf(math.MaxUint16/2))), "0.00")
 	assert.Equal(t, fmt.Sprintf("%.02f", reader(mkBuf(math.MaxUint16))), "1.00")
+
+	assert.Equal(t, floatToPCM(-1.0), 0)
+	assert.Equal(t, floatToPCM(0.0), 32767)
+	assert.Equal(t, floatToPCM(1.0), 65534)
 }
