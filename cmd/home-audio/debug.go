@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"os"
 	"time"
 
@@ -16,8 +15,8 @@ import (
 	"github.com/function61/gokit/encoding/jsonfile"
 	"github.com/samber/lo"
 	"github.com/spf13/cobra"
+	resampling "github.com/tphakala/go-audio-resampler"
 	"github.com/youpy/go-wav"
-	"github.com/zeozeozeo/gomplerate"
 )
 
 func debugEntrypoint() *cobra.Command {
@@ -102,7 +101,26 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 		outputSampleRate,
 		uint16(audioHeader.Width*8))
 
-	collectedForResampling := []int16{}
+	outputSamples := func(samples [][]float64) error {
+		asWavSamples := make([]wav.Sample, len(samples[0]))
+
+		for idx := range asWavSamples {
+			for ch := 0; ch < audioHeader.Channels; ch++ {
+				asWavSamples[idx].Values[ch] = int(samples[ch][idx])
+			}
+		}
+		return wavWriter.WriteSamples(asWavSamples)
+	}
+
+	resampler, err := resampling.New(&resampling.Config{
+		InputRate:  float64(audioHeader.Rate),
+		OutputRate: float64(outputSampleRate),
+		Channels:   audioHeader.Channels,
+		Quality:    resampling.QualitySpec{Preset: resampling.QualityMedium},
+	})
+	if err != nil {
+		return err
+	}
 
 	audioChunksProcessed := 0
 
@@ -112,25 +130,29 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 		case err != nil:
 			return err
 		case audioChunk.msg.Type == wyomingCommandAudioStop: // job here is done
+			slog.Info("resampled write path", "audioChunksProcessed", audioChunksProcessed)
+
 			if shouldResample {
-				resampler, err := gomplerate.NewResampler(1, audioHeader.Rate, *sampleRate)
-				if err != nil {
-					return err
-				}
-
-				resampled := resampler.ResampleInt16(collectedForResampling)
-				// resampled := downsamplePCM16WavValues(collectedForResampling, audioHeader.Rate, *sampleRate)
-				samples := make([]wav.Sample, len(resampled))
-				for i := range resampled {
-					samples[i].Values[0] = int(resampled[i])
-				}
-
-				slog.Info("resampled write path", "audioChunksProcessed", audioChunksProcessed)
-
-				if err := wavWriter.WriteSamples(samples); err != nil {
-					return err
+				// god knows what reason we've to have distinct paths for mono-vs-stereo flushing
+				if multiFlusher, ok := resampler.(resampling.MultiFlusher); ok {
+					remainingSamples, err := multiFlusher.FlushMulti()
+					if err != nil {
+						return err
+					}
+					if err := outputSamples(remainingSamples); err != nil {
+						return err
+					}
+				} else {
+					remainingSamples, err := resampler.Flush()
+					if err != nil {
+						return err
+					}
+					if err := outputSamples([][]float64{remainingSamples}); err != nil {
+						return err
+					}
 				}
 			}
+
 			return nil
 		default:
 			if err := audioChunk.msg.Type.ExpectToBe(wyomingCommandAudioChunk); err != nil {
@@ -150,17 +172,29 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 		// got audio chunk
 
 		if shouldResample {
-			if audioHeader.Channels != 1 {
-				panic("stereo resampling not supported")
-			}
+			samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
 
-			for sampleIdx, samplesInChunk := 0, len(audioChunk.payload)/audioHeader.Width/audioHeader.Channels; sampleIdx < samplesInChunk; sampleIdx++ {
-				for ch := 0; ch < audioHeader.Channels; ch++ {
+			// need to convert something like `int16` samples to float64 (for each channel)
+			convertedForResampling := make([][]float64, audioHeader.Channels)
+			for ch := range audioHeader.Channels {
+				convertedForResampling[ch] = make([]float64, samplesInChunk)
+			}
+			for sampleIdx := range samplesInChunk {
+				for ch := range audioHeader.Channels {
 					sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
 					channelOffset := ch * audioHeader.Width
 					offset := sampleOffset + channelOffset
-					collectedForResampling = append(collectedForResampling, int16(sampleReader(audioChunk.payload[offset:])))
+					convertedForResampling[ch] = append(convertedForResampling[ch], float64(sampleReader(audioChunk.payload[offset:])))
 				}
+			}
+
+			resampled, err := resampler.ProcessMulti(convertedForResampling)
+			if err != nil {
+				return err
+			}
+
+			if err := outputSamples(resampled); err != nil {
+				return err
 			}
 		} else {
 			samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
@@ -218,66 +252,4 @@ func wyomingDescribe(serverAddr string) error {
 	}
 
 	return nil
-}
-
-func downsamplePCM16WavValues(pcmData []int, srcSampleRate, dstSampleRate int) []int {
-	signedPcmData := make([]int, len(pcmData))
-	for i, sample := range pcmData {
-		signedPcmData[i] = int(int16(uint16(sample)))
-	}
-
-	signedDownsampled := downsamplePCM[int](signedPcmData, srcSampleRate, dstSampleRate)
-
-	wavValues := make([]int, len(signedDownsampled))
-	for i, sample := range signedDownsampled {
-		wavValues[i] = int(uint16(int16(sample)))
-	}
-
-	return wavValues
-}
-
-// downsamplePCM downsamples the sample rate to the given value using averaging values.
-// An example of reducing the sampling frequency from 48000 hertz to 16000 hertz:
-// PcmDownsample[int16]([]int16{...}, 48000, 16000)
-//
-// Note: attempting to upsample will return the result unchanged
-func downsamplePCM[U, T Number](pcmData []T, srcSampleRate, dstSampleRate int) []U {
-	sampleRateRatio := srcSampleRate / dstSampleRate
-	if sampleRateRatio <= 1 {
-		return convertNumbers[U](pcmData)
-	}
-
-	newPcmData := make([]U, len(pcmData)/sampleRateRatio)
-	var offsetResult = 0
-	var offsetBuffer = 0
-	for offsetResult < len(newPcmData) {
-		var nextOffsetBuffer = int(math.Round(float64(offsetResult+1) * float64(sampleRateRatio)))
-		// Use average value of skipped samples
-		var accum float64
-		var count float64
-		for i := offsetBuffer; i < nextOffsetBuffer && i < len(pcmData); i++ {
-			accum += float64(pcmData[i])
-			count++
-		}
-
-		newPcmData[offsetResult] = U(accum / count)
-		offsetResult++
-		offsetBuffer = nextOffsetBuffer
-	}
-
-	return newPcmData
-}
-
-// convertNumbers casts a slice of numbers to a slice of numbers of another type.
-// Example convert []int to []float32: convertNumbers[float32]([]int{1, 2, 3, 4, 5})
-func convertNumbers[U, T Number](s []T) []U {
-	out := make([]U, len(s))
-	for i := range s {
-		out[i] = U(s[i])
-	}
-	return out
-}
-
-type Number interface {
-	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~float32 | ~float64
 }

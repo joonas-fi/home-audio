@@ -1,8 +1,6 @@
 module github.com/joonas-fi/home-audio
 
-go 1.23.0
-
-toolchain go1.23.1
+go 1.26
 
 require (
 	github.com/function61/gokit v0.0.0-20250630084705-723dd31d86d9
@@ -23,12 +21,14 @@ require (
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/samber/lo v1.49.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/tphakala/go-audio-resampler v1.4.0 // indirect
+	github.com/tphakala/simd v1.1.0 // indirect
 	github.com/youpy/go-riff v0.1.0 // indirect
 	github.com/youpy/go-wav v0.3.2 // indirect
 	github.com/zaf/g711 v0.0.0-20190814101024-76a4a538f52b // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	golang.org/x/sync v0.15.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
 )
