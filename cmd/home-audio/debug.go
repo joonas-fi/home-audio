@@ -207,7 +207,11 @@ func resolveSampleReader(bitsPerSample int) (func([]byte) float64, error) {
 	switch bitsPerSample {
 	case 16:
 		return func(buf []byte) float64 {
-			return float64(binary.LittleEndian.Uint16(buf))
+			var i int16
+			if err := binary.Read(bytes.NewReader(buf), binary.LittleEndian, &i); err != nil {
+				panic(err)
+			}
+			return float64(i)
 
 		}, nil
 	default:
