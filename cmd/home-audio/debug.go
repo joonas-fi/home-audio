@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"time"
 
@@ -106,7 +107,7 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 
 		for idx := range asWavSamples {
 			for ch := 0; ch < audioHeader.Channels; ch++ {
-				asWavSamples[idx].Values[ch] = int(samples[ch][idx])
+				asWavSamples[idx].Values[ch] = int(samples[ch][idx] * math.MaxUint16)
 			}
 		}
 		return wavWriter.WriteSamples(asWavSamples)
@@ -170,25 +171,24 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 		}
 
 		// got audio chunk
+		numSamplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
+
+		// need to convert something like `int16` samples to float64 (for each channel)
+		samplesForChannel := make([][]float64, audioHeader.Channels)
+		for channel := range audioHeader.Channels {
+			samplesForChannel[channel] = make([]float64, numSamplesInChunk)
+		}
+		for sampleIdx := range numSamplesInChunk {
+			for channel := range audioHeader.Channels {
+				sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
+				channelOffset := channel * audioHeader.Width
+				offset := sampleOffset + channelOffset
+				samplesForChannel[channel][sampleIdx] = sampleReader(audioChunk.payload[offset:])
+			}
+		}
 
 		if shouldResample {
-			samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
-
-			// need to convert something like `int16` samples to float64 (for each channel)
-			convertedForResampling := make([][]float64, audioHeader.Channels)
-			for ch := range audioHeader.Channels {
-				convertedForResampling[ch] = make([]float64, samplesInChunk)
-			}
-			for sampleIdx := range samplesInChunk {
-				for ch := range audioHeader.Channels {
-					sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
-					channelOffset := ch * audioHeader.Width
-					offset := sampleOffset + channelOffset
-					convertedForResampling[ch] = append(convertedForResampling[ch], float64(sampleReader(audioChunk.payload[offset:])))
-				}
-			}
-
-			resampled, err := resampler.ProcessMulti(convertedForResampling)
+			resampled, err := resampler.ProcessMulti(samplesForChannel)
 			if err != nil {
 				return err
 			}
@@ -197,30 +197,19 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 				return err
 			}
 		} else {
-			samplesInChunk := len(audioChunk.payload) / audioHeader.Width / audioHeader.Channels
-			samples := make([]wav.Sample, samplesInChunk)
-			for sampleIdx := range samples {
-				for ch := 0; ch < audioHeader.Channels; ch++ {
-					sampleOffset := sampleIdx * audioHeader.Width * audioHeader.Channels
-					channelOffset := ch * audioHeader.Width
-					offset := sampleOffset + channelOffset
-					samples[sampleIdx].Values[ch] = sampleReader(audioChunk.payload[offset:])
-				}
-			}
-
-			if err := wavWriter.WriteSamples(samples); err != nil {
+			if err := outputSamples(samplesForChannel); err != nil {
 				return err
 			}
 		}
-
 	}
 }
 
-func resolveSampleReader(bitsPerSample int) (func([]byte) int, error) {
+func resolveSampleReader(bitsPerSample int) (func([]byte) float64, error) {
 	switch bitsPerSample {
 	case 16:
-		return func(buf []byte) int {
-			return int(binary.LittleEndian.Uint16(buf))
+		return func(buf []byte) float64 {
+			return float64(binary.LittleEndian.Uint16(buf)) / math.MaxUint16
+
 		}, nil
 	default:
 		return nil, fmt.Errorf("%d bits per sample not supported", bitsPerSample)
