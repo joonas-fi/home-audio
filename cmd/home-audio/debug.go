@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"os"
 	"time"
 
@@ -107,7 +106,7 @@ func wyomingTextToSpeech(ctx context.Context, serverAddr string, phrase string, 
 
 		for idx := range asWavSamples {
 			for ch := range audioHeader.Channels {
-				asWavSamples[idx].Values[ch] = floatToPCM(samples[ch][idx])
+				asWavSamples[idx].Values[ch] = int(samples[ch][idx])
 			}
 		}
 		return wavWriter.WriteSamples(asWavSamples)
@@ -208,8 +207,7 @@ func resolveSampleReader(bitsPerSample int) (func([]byte) float64, error) {
 	switch bitsPerSample {
 	case 16:
 		return func(buf []byte) float64 {
-			const half = math.MaxUint16 / 2
-			return (float64(binary.LittleEndian.Uint16(buf)) - half) / half
+			return float64(binary.LittleEndian.Uint16(buf))
 
 		}, nil
 	default:
@@ -242,9 +240,4 @@ func wyomingDescribe(serverAddr string) error {
 	}
 
 	return nil
-}
-
-// [-1...1] => 0..MaxUint16
-func floatToPCM(input float64) int {
-	return int((1 + input) * (math.MaxUint16 / 2))
 }
